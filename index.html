@@ -68,7 +68,7 @@
   .hidden { display: none; }
   .footer { font-size: 11px; color: #bbb; text-align: center; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #f0f0f0; }
 </style>
-
+<script src="https://accounts.google.com/gsi/client" async defer onload="initGoogleAuth()"></script>
 </head>
 <body>
 <div class="app">
@@ -205,6 +205,11 @@
 
 <script>
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4TA5y6_pYJTPYuNXYz2TtxU_-OYFRyIpAY2TrqwEQXioQ0EYTz0Sh7f7d_t_ICum5/exec";
+const CLIENT_ID  = "280102779739-7a5emobddg9st0lidmn5nncqn9cq3grj.apps.googleusercontent.com";
+const FOLDER_ID  = "1KlW-UNo1Scj45TXYd43qXb1jDtaIlBIE";
+const SCOPES     = "https://www.googleapis.com/auth/drive.file";
+let accessToken  = null;
+let tokenClient  = null;
 
 
 const AREA_DATA = {
@@ -428,6 +433,65 @@ function handleUpload(input) {
 }
 
 
+function initGoogleAuth() {
+  if (!window.google) return;
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: (tokenResponse) => {
+      accessToken = tokenResponse.access_token;
+    }
+  });
+}
+
+async function uploadToDrive(base64Data, fileName) {
+  return new Promise((resolve, reject) => {
+    function doUpload() {
+      const byteString = atob(base64Data.split(',')[1]);
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+      const blob = new Blob([ab], {type: "image/jpeg"});
+
+      const metadata = { name: fileName, mimeType: "image/jpeg", parents: [FOLDER_ID] };
+      const form = new FormData();
+      form.append("metadata", new Blob([JSON.stringify(metadata)], {type: "application/json"}));
+      form.append("file", blob);
+
+      fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + accessToken },
+        body: form
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.id) {
+          fetch("https://www.googleapis.com/drive/v3/files/" + data.id + "/permissions", {
+            method: "POST",
+            headers: { Authorization: "Bearer " + accessToken, "Content-Type": "application/json" },
+            body: JSON.stringify({role: "reader", type: "anyone"})
+          }).finally(() => resolve(data.webViewLink || "https://drive.google.com/file/d/" + data.id + "/view"));
+        } else {
+          reject("Upload failed");
+        }
+      })
+      .catch(err => reject(err));
+    }
+
+    if (!accessToken) {
+      tokenClient.requestAccessToken();
+      let waited = 0;
+      const check = setInterval(() => {
+        waited += 200;
+        if (accessToken) { clearInterval(check); doUpload(); }
+        else if (waited > 20000) { clearInterval(check); reject("Auth timeout"); }
+      }, 200);
+    } else {
+      doUpload();
+    }
+  });
+}
+
 function acquireGPS() {
   if (!navigator.geolocation) { setGPS("failed","GPS not supported",null); return; }
   navigator.geolocation.getCurrentPosition(
@@ -520,7 +584,21 @@ function submitData() {
     btn.textContent = "Submitting...";
 
     try {
-      // STEP 1: Submit row data (always, no photo yet)
+      // If photo exists, upload to Drive first to get the link
+      let photoLink = "No photo";
+      if (uploadedFileBase64 && uploadedFileName) {
+        try {
+          btn.textContent = "Uploading photo...";
+          photoLink = await uploadToDrive(uploadedFileBase64, uploadedFileName);
+        } catch(photoErr) {
+          photoLink = "Photo upload failed";
+        }
+      }
+
+      // Replace photo placeholder in row with actual Drive link
+      row[8] = photoLink;
+
+      // Submit row data with photo link already included
       const params = new URLSearchParams();
       params.append("row", JSON.stringify(row));
 
@@ -533,38 +611,6 @@ function submitData() {
 
       showToast("✓ Submitted successfully!", "success");
       resetForm();
-
-      // STEP 2: Upload photo separately if available
-      if (uploadedFileBase64 && uploadedFileName) {
-        const rowId = row[0] + "_" + row[1] + "_" + row[4];
-
-        // Re-compress to very small size for reliable transmission
-        const uploadBase64 = await new Promise(resolve => {
-          const img = new window.Image();
-          img.onload = () => {
-            const MAX = 300;
-            let w = img.width, h = img.height;
-            if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
-            const canvas = document.createElement("canvas");
-            canvas.width = w; canvas.height = h;
-            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL("image/jpeg", 0.3));
-          };
-          img.src = uploadedFileBase64;
-        });
-
-        const photoParams = new URLSearchParams();
-        photoParams.append("fileData", uploadBase64);
-        photoParams.append("fileName", uploadedFileName);
-        photoParams.append("rowId", rowId);
-
-        fetch(SCRIPT_URL, {
-          method: "POST",
-          mode: "no-cors",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: photoParams.toString()
-        }).catch(() => {});
-      }
 
     } catch(err) {
       showToast("Submission failed. Check connection.", "error");
