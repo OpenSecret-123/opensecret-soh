@@ -68,7 +68,7 @@
   .hidden { display: none; }
   .footer { font-size: 11px; color: #bbb; text-align: center; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #f0f0f0; }
 </style>
-<script src="https://accounts.google.com/gsi/client" async defer onload="initGoogleAuth()"></script>
+
 </head>
 <body>
 <div class="app">
@@ -93,7 +93,6 @@
         <option value="" disabled selected>Select officer...</option>
         <option value="Satish">Satish</option>
         <option value="Suman">Suman</option>
-        <option value="Jitendra Rajpurohit">Jitendra Rajpurohit</option>
         <option value="Jitendra Rajpurohit">Jitendra Rajpurohit</option>
         <option value="Other">Other</option>
       </select>
@@ -206,7 +205,7 @@
 
 <script>
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzs1Khneu78a0FWWqilR9P22XL1pXyNOGmj1OvfDfBwv_XDR15kExNm3v6dlveABhoU/exec";
-const CLIENT_ID = "280102779739-7a5emobddg9st0lidmn5nncqn9cq3grj.apps.googleusercontent.com";
+const CLIENT_ID = "632567777271-9sd1p3dge6uh7mv9bkavsdt575ok2qfj.apps.googleusercontent.com";
 const FOLDER_ID = "1KlW-UNo1Scj45TXYd43qXb1jDtaIlBIE";
 const SCOPES = "https://www.googleapis.com/auth/drive.file";
 let accessToken = null;
@@ -426,11 +425,6 @@ function handleUpload(input) {
       const sizeKB = Math.round(uploadedFileBase64.length * 0.75 / 1024);
       document.getElementById("uploadFilename").textContent = "📎 " + uploadedFileName + " (" + sizeKB + " KB)";
       document.getElementById("uploadPreview").style.display = "block";
-
-      // Pre-request OAuth token now so it's ready when user hits Submit
-      if (tokenClient && !accessToken) {
-        tokenClient.requestAccessToken();
-      }
     };
     img.src = e.target.result;
   };
@@ -458,7 +452,7 @@ async function uploadToDrive(base64Data, fileName) {
         if (accessToken) {
           clearInterval(check);
           doUpload(base64Data, fileName, resolve, reject);
-        } else if (waited > 30000) {
+        } else if (waited > 15000) {
           clearInterval(check);
           reject("Auth timeout");
         }
@@ -603,46 +597,45 @@ function submitData() {
 
   async function doSubmit() {
     btn.textContent = "Submitting...";
-    try {
-      // STEP 1: Send row data immediately with "Uploading..." as photo placeholder
-      row[8] = uploadedFileBase64 ? "Uploading..." : "No photo";
 
-      const params = new URLSearchParams();
-      params.append("row", JSON.stringify(row));
-      await fetch(SCRIPT_URL, {
-        method: "POST",
-        mode: "no-cors",
-        headers: {"Content-Type": "application/x-www-form-urlencoded"},
-        body: params.toString()
-      });
+    // Use hidden iframe + form POST - most reliable for Apps Script
+    const iframeName = "submit_iframe_" + Date.now();
+    const iframe = document.createElement("iframe");
+    iframe.name = iframeName;
+    iframe.style.display = "none";
+    document.body.appendChild(iframe);
 
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = SCRIPT_URL;
+    form.target = iframeName;
+    form.style.display = "none";
+    form.enctype = "application/x-www-form-urlencoded";
+
+    const addHidden = (name, value) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    };
+
+    addHidden("row", JSON.stringify(row));
+    if (uploadedFileBase64) {
+      addHidden("fileData", uploadedFileBase64);
+      addHidden("fileName", uploadedFileName);
+    }
+
+    document.body.appendChild(form);
+    form.submit();
+
+    setTimeout(() => {
       showToast("✓ Submitted successfully!", "success");
       resetForm();
-
-      // STEP 2: Upload photo to Drive in background if available
-      if (uploadedFileBase64 && uploadedFileName) {
-        try {
-          uploadToDrive(uploadedFileBase64, uploadedFileName).then(function(link) {
-            // Photo uploaded - update the sheet row via script
-            var updateParams = new URLSearchParams();
-            updateParams.append("updatePhoto", "1");
-            updateParams.append("photoLink", link);
-            fetch(SCRIPT_URL, {
-              method: "POST",
-              mode: "no-cors",
-              headers: {"Content-Type": "application/x-www-form-urlencoded"},
-              body: updateParams.toString()
-            });
-          }).catch(function() {});
-        } catch(e) {}
-      }
-
-    } catch(err) {
-      showToast("Submission failed. Check connection.", "error");
-    } finally {
       btn.disabled = false;
       btn.textContent = "Submit to Google Sheet";
-    }
+      try { document.body.removeChild(form); document.body.removeChild(iframe); } catch(e) {}
+    }, 4000);
   }
 
   doSubmit();
