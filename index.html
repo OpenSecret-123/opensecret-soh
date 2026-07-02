@@ -599,19 +599,9 @@ function submitData() {
   async function doSubmit() {
     btn.textContent = "Submitting...";
     try {
-      // Upload photo to Drive first if available
-      let photoLink = "No photo";
-      if (uploadedFileBase64 && uploadedFileName) {
-        try {
-          btn.textContent = "Uploading photo...";
-          photoLink = await uploadToDrive(uploadedFileBase64, uploadedFileName);
-        } catch(e) {
-          photoLink = "Photo failed";
-        }
-      }
-      row[8] = photoLink;
+      // STEP 1: Send row data immediately with "Uploading..." as photo placeholder
+      row[8] = uploadedFileBase64 ? "Uploading..." : "No photo";
 
-      // Send row data to Apps Script
       const params = new URLSearchParams();
       params.append("row", JSON.stringify(row));
       await fetch(SCRIPT_URL, {
@@ -620,8 +610,28 @@ function submitData() {
         headers: {"Content-Type": "application/x-www-form-urlencoded"},
         body: params.toString()
       });
+
       showToast("✓ Submitted successfully!", "success");
       resetForm();
+
+      // STEP 2: Upload photo to Drive in background if available
+      if (uploadedFileBase64 && uploadedFileName) {
+        try {
+          uploadToDrive(uploadedFileBase64, uploadedFileName).then(function(link) {
+            // Photo uploaded - update the sheet row via script
+            var updateParams = new URLSearchParams();
+            updateParams.append("updatePhoto", "1");
+            updateParams.append("photoLink", link);
+            fetch(SCRIPT_URL, {
+              method: "POST",
+              mode: "no-cors",
+              headers: {"Content-Type": "application/x-www-form-urlencoded"},
+              body: updateParams.toString()
+            });
+          }).catch(function() {});
+        } catch(e) {}
+      }
+
     } catch(err) {
       showToast("Submission failed. Check connection.", "error");
     } finally {
