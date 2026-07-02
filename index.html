@@ -204,7 +204,7 @@
 </div>
 
 <script>
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4TA5y6_pYJTPYuNXYz2TtxU_-OYFRyIpAY2TrqwEQXioQ0EYTz0Sh7f7d_t_ICum5/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxjraO2-v8fpHmBAfxFeKZg58q4A-cZWM1aG61OjKFJCWKRjPY4C6l8RpAcmxmwXfkB/exec";
 
 
 const AREA_DATA = {
@@ -520,28 +520,38 @@ function submitData() {
     btn.textContent = "Submitting...";
 
     try {
-      const payload = { row: JSON.stringify(row) };
-      if (uploadedFileBase64) {
-        payload.fileData = uploadedFileBase64;
-        payload.fileName = uploadedFileName;
-      }
-
-      // Build URL-encoded body
-      const body = Object.keys(payload)
-        .map(k => encodeURIComponent(k) + "=" + encodeURIComponent(payload[k]))
-        .join("&");
+      // STEP 1: Submit row data (always, no photo yet)
+      const params = new URLSearchParams();
+      params.append("row", JSON.stringify(row));
 
       await fetch(SCRIPT_URL, {
         method: "POST",
         mode: "no-cors",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body
+        body: params.toString()
       });
 
       showToast("✓ Submitted successfully!", "success");
       resetForm();
+
+      // STEP 2: Upload photo separately if available
+      if (uploadedFileBase64 && uploadedFileName) {
+        const rowId = row[0] + "_" + row[1] + "_" + row[4];
+        const photoParams = new URLSearchParams();
+        photoParams.append("fileData", uploadedFileBase64);
+        photoParams.append("fileName", uploadedFileName);
+        photoParams.append("rowId", rowId);
+
+        fetch(SCRIPT_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: photoParams.toString()
+        }).catch(() => {});
+      }
+
     } catch(err) {
-      showToast("Submission failed: " + err.message, "error");
+      showToast("Submission failed. Check connection.", "error");
     } finally {
       btn.disabled = false;
       btn.textContent = "Submit to Google Sheet";
