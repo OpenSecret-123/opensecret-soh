@@ -426,6 +426,11 @@ function handleUpload(input) {
       const sizeKB = Math.round(uploadedFileBase64.length * 0.75 / 1024);
       document.getElementById("uploadFilename").textContent = "📎 " + uploadedFileName + " (" + sizeKB + " KB)";
       document.getElementById("uploadPreview").style.display = "block";
+
+      // Pre-request OAuth token now so it's ready when user hits Submit
+      if (tokenClient && !accessToken) {
+        tokenClient.requestAccessToken();
+      }
     };
     img.src = e.target.result;
   };
@@ -453,7 +458,7 @@ async function uploadToDrive(base64Data, fileName) {
         if (accessToken) {
           clearInterval(check);
           doUpload(base64Data, fileName, resolve, reject);
-        } else if (waited > 15000) {
+        } else if (waited > 30000) {
           clearInterval(check);
           reject("Auth timeout");
         }
