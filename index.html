@@ -598,45 +598,36 @@ function submitData() {
 
   async function doSubmit() {
     btn.textContent = "Submitting...";
+    try {
+      // Upload photo to Drive first if available
+      let photoLink = "No photo";
+      if (uploadedFileBase64 && uploadedFileName) {
+        try {
+          btn.textContent = "Uploading photo...";
+          photoLink = await uploadToDrive(uploadedFileBase64, uploadedFileName);
+        } catch(e) {
+          photoLink = "Photo failed";
+        }
+      }
+      row[8] = photoLink;
 
-    // Use hidden iframe + form POST - most reliable for Apps Script
-    const iframeName = "submit_iframe_" + Date.now();
-    const iframe = document.createElement("iframe");
-    iframe.name = iframeName;
-    iframe.style.display = "none";
-    document.body.appendChild(iframe);
-
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = SCRIPT_URL;
-    form.target = iframeName;
-    form.style.display = "none";
-    form.enctype = "application/x-www-form-urlencoded";
-
-    const addHidden = (name, value) => {
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = name;
-      input.value = value;
-      form.appendChild(input);
-    };
-
-    addHidden("row", JSON.stringify(row));
-    if (uploadedFileBase64) {
-      addHidden("fileData", uploadedFileBase64);
-      addHidden("fileName", uploadedFileName);
-    }
-
-    document.body.appendChild(form);
-    form.submit();
-
-    setTimeout(() => {
+      // Send row data to Apps Script
+      const params = new URLSearchParams();
+      params.append("row", JSON.stringify(row));
+      await fetch(SCRIPT_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: {"Content-Type": "application/x-www-form-urlencoded"},
+        body: params.toString()
+      });
       showToast("✓ Submitted successfully!", "success");
       resetForm();
+    } catch(err) {
+      showToast("Submission failed. Check connection.", "error");
+    } finally {
       btn.disabled = false;
       btn.textContent = "Submit to Google Sheet";
-      try { document.body.removeChild(form); document.body.removeChild(iframe); } catch(e) {}
-    }, 4000);
+    }
   }
 
   doSubmit();
